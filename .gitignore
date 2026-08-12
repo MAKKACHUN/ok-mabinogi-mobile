@@ -3,7 +3,7 @@ updates/
 working/
 update/
 tesseract
-models
+/models/
 cache/
 fonts
 data2
@@ -13,7 +13,7 @@ data_export
 data_import
 __pycache__/
 *.msgpack
-data/
+/data/
 *$py.class
 configs/
 paddle_model/
