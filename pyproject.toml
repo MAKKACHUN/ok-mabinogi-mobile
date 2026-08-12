@@ -1,0 +1,25 @@
+[project]
+name = "ok-duet-night-abyss"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ok-script>=1.0.105",
+    "onnxocr-ppocrv5>=0.0.14",
+    "opencv-python>=4.13.0.92",
+    "openvino>=2026.1.0",
+    "playwright>=1.58.0",
+    "pynput==1.8.1",
+    "pyside6==6.9.1",
+]
+
+[dependency-groups]
+dev = [
+    "polib>=1.2.0",
+]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'win32'"
+]
