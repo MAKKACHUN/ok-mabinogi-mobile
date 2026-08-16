@@ -17,6 +17,9 @@ from src.plugins.wild_boss.storage import BossScheduleStorage
 
 
 class WildBossScheduleTest(unittest.TestCase):
+    def test_default_lead_time_is_five_minutes(self) -> None:
+        self.assertEqual(DEFAULT_BOSS_SCHEDULE.lead_minutes, 5)
+
     def make_settings(self, time_hhmm: str) -> BossScheduleSettings:
         return BossScheduleSettings(
             items=[

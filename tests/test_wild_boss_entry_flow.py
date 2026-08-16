@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -167,13 +168,11 @@ class WildBossEntryFlowTest(unittest.TestCase):
 
     def test_boss_cycle_fights_then_leaves_room(self) -> None:
         task = self.make_task()
-        exit_task_box = object()
+        exit_confirm_box = object()
         task.wait_for_battle_completion = MagicMock(
-            return_value=exit_task_box
+            return_value=exit_confirm_box
         )
-        task.wait_for_feature = MagicMock(return_value=object())
         task.wait_until = MagicMock(return_value=True)
-        task.move_and_click = MagicMock()
         scheduled = datetime(
             2026, 8, 10, 12, 0, tzinfo=HONG_KONG_TIMEZONE
         )
@@ -190,28 +189,15 @@ class WildBossEntryFlowTest(unittest.TestCase):
             [call.args[0] for call in task.send_key.call_args_list],
             ["space", "space"],
         )
-        task.move_and_click.assert_called_once_with(
-            exit_task_box,
-            after_sleep=1.5,
-        )
-        self.assertEqual(
-            [call.args[0] for call in task.wait_for_feature.call_args_list],
-            [task.EXIT_CONFIRM_FEATURE],
-        )
         task.wait_for_battle_completion.assert_called_once_with()
         task.wait_until_boss_ready.assert_called_once_with(
             scheduled,
             "腐化根獸",
         )
-        self.assertEqual(
-            task.wait_for_feature.call_args_list[0].args[1],
-            120,
-        )
 
     def test_boss_cycle_stops_if_exit_task_marker_times_out(self) -> None:
         task = self.make_task()
         task.wait_for_battle_completion = MagicMock(return_value=None)
-        task.wait_for_feature = MagicMock()
         task.wait_until = MagicMock(return_value=True)
         scheduled = datetime(
             2026, 8, 10, 12, 0, tzinfo=HONG_KONG_TIMEZONE
@@ -225,12 +211,12 @@ class WildBossEntryFlowTest(unittest.TestCase):
             ["space"],
         )
         task.wait_for_battle_completion.assert_called_once_with()
-        task.wait_for_feature.assert_not_called()
 
     def test_battle_monitor_moves_mouse_away_after_skipping_cutscene(self) -> None:
         task = self.make_task()
         skip_box = object()
         task.find_one = MagicMock(side_effect=[None, skip_box])
+        task.find_any_feature = MagicMock(return_value=None)
         task.move_and_click = MagicMock()
 
         result = task.find_battle_completion_or_handle_overlay()
@@ -238,7 +224,16 @@ class WildBossEntryFlowTest(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(
             [call.args[0] for call in task.find_one.call_args_list],
-            [task.VICTORY_FEATURE, task.SKIP_CUTSCENE_FEATURE],
+            [
+                task.EXIT_CONFIRM_FEATURE,
+                task.SKIP_CUTSCENE_FEATURE,
+            ],
+        )
+        task.find_any_feature.assert_called_once_with(
+            task.VICTORY_FEATURES,
+            horizontal_variance=0.04,
+            vertical_variance=0.04,
+            threshold=0.82,
         )
         task.move_and_click.assert_called_once_with(
             skip_box,
@@ -250,14 +245,15 @@ class WildBossEntryFlowTest(unittest.TestCase):
     def test_battle_monitor_confirms_victory_and_keeps_waiting(self) -> None:
         task = self.make_task()
         victory_box = object()
-        task.find_one = MagicMock(return_value=victory_box)
+        task.find_one = MagicMock(return_value=None)
+        task.find_any_feature = MagicMock(return_value=victory_box)
         task.move_and_click = MagicMock()
 
         result = task.find_battle_completion_or_handle_overlay()
 
         self.assertIsNone(result)
-        task.find_one.assert_called_once_with(
-            task.VICTORY_FEATURE,
+        task.find_any_feature.assert_called_once_with(
+            task.VICTORY_FEATURES,
             horizontal_variance=0.04,
             vertical_variance=0.04,
             threshold=0.82,
@@ -269,24 +265,47 @@ class WildBossEntryFlowTest(unittest.TestCase):
         )
         task.move_and_click.assert_not_called()
 
-    def test_battle_monitor_finishes_only_on_exit_task_marker(self) -> None:
+    def test_battle_monitor_clicks_exit_task_then_keeps_watching(self) -> None:
         task = self.make_task()
         task._battle_victory_confirmed = True
         exit_task_box = object()
         task.find_one = MagicMock(
             side_effect=[None, None, exit_task_box]
         )
+        task.find_any_feature = MagicMock(return_value=None)
+        task.move_and_click = MagicMock()
 
         result = task.find_battle_completion_or_handle_overlay()
 
-        self.assertIs(result, exit_task_box)
+        self.assertIsNone(result)
         self.assertEqual(
             [call.args[0] for call in task.find_one.call_args_list],
             [
-                task.VICTORY_FEATURE,
+                task.EXIT_CONFIRM_FEATURE,
                 task.SKIP_CUTSCENE_FEATURE,
                 task.EXIT_TASK_FEATURE,
             ],
+        )
+        task.move_and_click.assert_called_once_with(
+            exit_task_box,
+            after_sleep=0.1,
+        )
+        task.pydirect_interaction.move.assert_called_once_with(800, 450)
+        task.sleep.assert_called_once_with(0.9)
+
+    def test_battle_monitor_finishes_on_exit_confirmation(self) -> None:
+        task = self.make_task()
+        exit_confirm_box = object()
+        task.find_one = MagicMock(return_value=exit_confirm_box)
+
+        result = task.find_battle_completion_or_handle_overlay()
+
+        self.assertIs(result, exit_confirm_box)
+        task.find_one.assert_called_once_with(
+            task.EXIT_CONFIRM_FEATURE,
+            horizontal_variance=0.04,
+            vertical_variance=0.04,
+            threshold=0.82,
         )
 
     def test_exit_task_before_victory_does_not_finish_battle(self) -> None:
@@ -298,12 +317,16 @@ class WildBossEntryFlowTest(unittest.TestCase):
                 None,
                 None,
                 exit_task_box,
-                victory_box,
+                None,
                 None,
                 None,
                 exit_task_box,
             ]
         )
+        task.find_any_feature = MagicMock(
+            side_effect=[None, victory_box, None]
+        )
+        task.move_and_click = MagicMock()
 
         before_victory = task.find_battle_completion_or_handle_overlay()
         victory = task.find_battle_completion_or_handle_overlay()
@@ -311,8 +334,13 @@ class WildBossEntryFlowTest(unittest.TestCase):
 
         self.assertIsNone(before_victory)
         self.assertIsNone(victory)
-        self.assertIs(after_victory, exit_task_box)
+        self.assertIsNone(after_victory)
         self.assertTrue(task._battle_victory_confirmed)
+        task.move_and_click.assert_called_once_with(
+            exit_task_box,
+            after_sleep=0.1,
+        )
+        task.pydirect_interaction.move.assert_called_once_with(800, 450)
         task.send_key.assert_called_once_with(
             "space",
             down_time=0.08,
@@ -345,25 +373,117 @@ class WildBossEntryFlowTest(unittest.TestCase):
     def test_waiting_screen_is_not_ready_to_fight(self) -> None:
         task = self.make_task()
         task.is_main_screen = MagicMock(return_value=True)
-        task.find_one = MagicMock(return_value=object())
+        task.find_all_features = MagicMock(return_value=object())
+        task.find_any_feature = MagicMock()
 
         self.assertFalse(task.is_boss_ready_to_fight())
-        task.find_one.assert_called_once_with(
-            task.WAITING_FOR_BOSS_FEATURE,
+        task.find_all_features.assert_called_once_with(
+            task.WAITING_FOR_BOSS_FEATURES,
             horizontal_variance=0.04,
             vertical_variance=0.04,
             threshold=0.8,
         )
+        task.find_any_feature.assert_not_called()
 
     def test_ready_requires_waiting_gone_and_room_ready_present(self) -> None:
         task = self.make_task()
         task.is_main_screen = MagicMock(return_value=True)
-        task.find_one = MagicMock(side_effect=[None, object()])
+        task.find_all_features = MagicMock(return_value=None)
+        task.find_any_feature = MagicMock(return_value=object())
 
         self.assertTrue(task.is_boss_ready_to_fight())
+        task.find_all_features.assert_called_once_with(
+            task.WAITING_FOR_BOSS_FEATURES,
+            horizontal_variance=0.04,
+            vertical_variance=0.04,
+            threshold=0.8,
+        )
+        task.find_any_feature.assert_called_once_with(
+            task.ROOM_READY_FEATURES,
+            horizontal_variance=0.04,
+            vertical_variance=0.04,
+            threshold=0.82,
+        )
+
+    def test_find_all_features_requires_every_feature(self) -> None:
+        task = self.make_task()
+        first = object()
+        task.find_one = MagicMock(side_effect=[first, object()])
+
+        result = task.find_all_features(("31_01", "31_02"), threshold=0.8)
+
+        self.assertIs(result, first)
         self.assertEqual(
             [call.args[0] for call in task.find_one.call_args_list],
-            [task.WAITING_FOR_BOSS_FEATURE, task.ROOM_READY_FEATURE],
+            ["31_01", "31_02"],
+        )
+
+        task.find_one = MagicMock(side_effect=[first, None])
+        self.assertIsNone(
+            task.find_all_features(("31_01", "31_02"), threshold=0.8)
+        )
+
+    def test_find_any_feature_accepts_one_match(self) -> None:
+        task = self.make_task()
+        match = object()
+        task.find_one = MagicMock(side_effect=[None, match, object()])
+
+        result = task.find_any_feature(
+            ("20_01", "33_01", "34_01"),
+            threshold=0.82,
+        )
+
+        self.assertIs(result, match)
+        self.assertEqual(
+            [call.args[0] for call in task.find_one.call_args_list],
+            ["20_01", "33_01"],
+        )
+
+    def test_boss_feature_mapping_uses_numbered_templates(self) -> None:
+        self.assertEqual(AutoWildBossTask.MENU_FEATURE, "28_01")
+        self.assertEqual(
+            AutoWildBossTask.MOVE_CONFIRM_FEATURES,
+            ("30_01", "30_02"),
+        )
+        self.assertEqual(
+            AutoWildBossTask.ENTRY_CONFIRM_FEATURES,
+            ("16_01", "16_02"),
+        )
+        self.assertEqual(
+            AutoWildBossTask.ENTRY_NOT_READY_FEATURES,
+            ("29_01", "29_02"),
+        )
+        self.assertEqual(
+            AutoWildBossTask.WAITING_FOR_BOSS_FEATURES,
+            ("31_01", "31_02"),
+        )
+        self.assertEqual(
+            AutoWildBossTask.ROOM_READY_FEATURES,
+            ("20_01", "33_01", "34_01"),
+        )
+        self.assertEqual(
+            AutoWildBossTask.VICTORY_FEATURES,
+            ("36_01", "17_01"),
+        )
+        self.assertEqual(AutoWildBossTask.SKIP_CUTSCENE_FEATURE, "35_01")
+        self.assertEqual(AutoWildBossTask.EXIT_TASK_FEATURE, "18_01")
+        self.assertEqual(AutoWildBossTask.EXIT_CONFIRM_FEATURE, "19_01")
+
+    def test_exit_task_click_uses_18_01_center(self) -> None:
+        task = self.make_task()
+        box = SimpleNamespace(
+            x=1498,
+            y=253,
+            width=81,
+            height=28,
+            name="18_01",
+        )
+
+        task.move_and_click(box, after_sleep=0.1)
+
+        task.pydirect_interaction.move.assert_called_once_with(1538, 267)
+        task.pydirect_interaction.click.assert_called_once_with(
+            down_time=0.1
         )
 
     def test_navigate_uses_space_immediately_after_boss_selection(self) -> None:
@@ -404,7 +524,7 @@ class WildBossEntryFlowTest(unittest.TestCase):
         task.move_and_click = MagicMock()
         task.select_boss_row = MagicMock()
 
-        with self.assertRaisesRegex(RuntimeError, "30.png"):
+        with self.assertRaisesRegex(RuntimeError, r"30_01 \+ 30_02"):
             AutoWildBossTask.navigate_to_boss(task, 0, "佩里")
 
         self.assertEqual(
