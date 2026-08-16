@@ -3,8 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import cv2
-
 from src.plugins.wild_boss.tasks.AutoWildBossTask import AutoWildBossTask
 from src.tasks.BaseDNATask import BaseDNATask
 
@@ -18,7 +16,6 @@ class BottomConfirmPopupTest(unittest.TestCase):
         task.log_info = MagicMock()
         task.ensure_in_front = MagicMock()
         task.send_key = MagicMock()
-        task.find_bottom_confirm_color_button = MagicMock(return_value=False)
         return task
 
     def test_detected_popup_presses_space(self) -> None:
@@ -29,15 +26,12 @@ class BottomConfirmPopupTest(unittest.TestCase):
 
         self.assertEqual(
             [call.args[0] for call in task.find_one.call_args_list],
-            [
-                "bottom_confirm_item_delivery_text",
-                "bottom_confirm_button",
-            ],
+            ["37_01"],
         )
         for find_call in task.find_one.call_args_list:
             self.assertNotIn("use_gray_scale", find_call.kwargs)
-        task.find_one.assert_any_call(
-            "bottom_confirm_button",
+        task.find_one.assert_called_once_with(
+            "37_01",
             horizontal_variance=0.03,
             vertical_variance=0.03,
             threshold=0.80,
@@ -73,50 +67,12 @@ class BottomConfirmPopupTest(unittest.TestCase):
 
         task.send_key.assert_not_called()
 
-    def test_confirm_button_without_delivery_text_does_not_press(self) -> None:
-        task = self.make_task()
-        task.find_one.return_value = None
-        task.find_bottom_confirm_color_button.return_value = True
-
-        self.assertFalse(task.handle_bottom_confirm_popup())
-
-        task.find_bottom_confirm_color_button.assert_not_called()
-        task.send_key.assert_not_called()
-
-    def test_green_button_fallback_presses_space(self) -> None:
-        task = self.make_task()
-        task.find_one.side_effect = [object(), None]
-        task.find_bottom_confirm_color_button.return_value = True
-
-        with patch("src.tasks.BaseDNATask.time.monotonic", return_value=10.0):
-            self.assertTrue(task.handle_bottom_confirm_popup())
-
-        task.send_key.assert_called_once_with(
-            "space",
-            down_time=0.08,
-            after_sleep=0,
-        )
-
-    def test_green_button_fallback_matches_37_but_not_entry_dialog(self) -> None:
-        project_root = Path(__file__).resolve().parents[1]
-        popup = cv2.imread(
-            str(project_root / "assets" / "images" / "bottom_confirm_button.png")
-        )
-        entry_dialog = cv2.imread(
-            str(project_root / "assets" / "images" / "0.png")
-        )
-        task = BaseDNATask.__new__(BaseDNATask)
-
-        self.assertTrue(task.find_bottom_confirm_color_button(popup))
-        self.assertFalse(task.find_bottom_confirm_color_button(entry_dialog))
-
     def test_bottom_confirm_preserves_battle_victory_state(self) -> None:
         task = AutoWildBossTask.__new__(AutoWildBossTask)
         task._bottom_confirm_check_enabled = True
         task._bottom_confirm_last_handled_at = float("-inf")
         task._monitoring_battle_completion = True
         task.find_one = MagicMock(return_value=object())
-        task.find_bottom_confirm_color_button = MagicMock(return_value=False)
         task.log_info = MagicMock()
         task.ensure_in_front = MagicMock()
         task.send_key = MagicMock()
@@ -139,7 +95,6 @@ class BottomConfirmPopupTest(unittest.TestCase):
         task._monitoring_battle_completion = True
         task._battle_victory_confirmed = False
         task.find_one = MagicMock(return_value=object())
-        task.find_bottom_confirm_color_button = MagicMock(return_value=False)
         task.log_info = MagicMock()
         task.ensure_in_front = MagicMock()
         task.send_key = MagicMock()
@@ -238,20 +193,10 @@ class BottomConfirmPopupTest(unittest.TestCase):
         annotation_path = project_root / "assets" / "coco_annotations.json"
         data = json.loads(annotation_path.read_text(encoding="utf-8-sig"))
 
-        button_category = next(
-            item
-            for item in data["categories"]
-            if item["name"] == "bottom_confirm_button"
-        )
         delivery_category = next(
             item
             for item in data["categories"]
-            if item["name"] == "bottom_confirm_item_delivery_text"
-        )
-        button_annotation = next(
-            item
-            for item in data["annotations"]
-            if item["category_id"] == button_category["id"]
+            if item["name"] == "37_01"
         )
         delivery_annotation = next(
             item
@@ -261,18 +206,10 @@ class BottomConfirmPopupTest(unittest.TestCase):
         image = next(
             item
             for item in data["images"]
-            if item["id"] == button_annotation["image_id"]
+            if item["id"] == delivery_annotation["image_id"]
         )
 
-        self.assertEqual(button_annotation["bbox"], [765, 805, 70, 40])
-        self.assertEqual(
-            delivery_annotation["bbox"],
-            [600, 344, 395, 28],
-        )
-        self.assertEqual(
-            delivery_annotation["image_id"],
-            button_annotation["image_id"],
-        )
+        self.assertEqual(delivery_annotation["bbox"], [604, 348, 386, 19])
         self.assertTrue((project_root / "assets" / image["file_name"]).is_file())
 
 
