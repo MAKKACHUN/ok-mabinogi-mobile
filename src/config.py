@@ -169,6 +169,7 @@ config = {
     'onetime_tasks': [  # tasks to execute
         ["src.plugins.wild_boss.tasks.AutoWildBossTask", "AutoWildBossTask"],
         ["src.plugins.gather.tasks.AutoGatherTask", "AutoGatherTask"],
+        ["src.plugins.map_events.tasks.AutoMapEventTask", "AutoMapEventTask"],
     ],
     'trigger_tasks': [],
     'scene': ["src.scene.DNAScene", "DNAScene"],

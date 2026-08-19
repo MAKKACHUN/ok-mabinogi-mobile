@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from ok import BaseTask
+
 from src.plugins.wild_boss.tasks.AutoWildBossTask import AutoWildBossTask
 from src.tasks.BaseDNATask import BaseDNATask
 
@@ -16,6 +18,7 @@ class BottomConfirmPopupTest(unittest.TestCase):
         task.log_info = MagicMock()
         task.ensure_in_front = MagicMock()
         task.send_key = MagicMock()
+        task.sleep = MagicMock()
         return task
 
     def test_detected_popup_presses_space(self) -> None:
@@ -44,7 +47,9 @@ class BottomConfirmPopupTest(unittest.TestCase):
             down_time=0.08,
             after_sleep=0,
         )
+        task.sleep.assert_called_once_with(0.8)
         self.assertTrue(task._bottom_confirm_did_press)
+        self.assertFalse(task._bottom_confirm_action_guard)
 
     def test_visible_popup_is_not_repeated_inside_retry_window(self) -> None:
         task = self.make_task()
@@ -76,6 +81,7 @@ class BottomConfirmPopupTest(unittest.TestCase):
         task.log_info = MagicMock()
         task.ensure_in_front = MagicMock()
         task.send_key = MagicMock()
+        task.sleep = MagicMock()
 
         with patch("src.tasks.BaseDNATask.time.monotonic", return_value=10.0):
             self.assertTrue(task.handle_bottom_confirm_popup())
@@ -98,12 +104,74 @@ class BottomConfirmPopupTest(unittest.TestCase):
         task.log_info = MagicMock()
         task.ensure_in_front = MagicMock()
         task.send_key = MagicMock()
+        task.sleep = MagicMock()
 
         with patch("src.tasks.BaseDNATask.time.monotonic", return_value=10.0):
             self.assertTrue(task.handle_bottom_confirm_popup())
 
         self.assertTrue(task._battle_victory_confirmed)
         self.assertEqual(task._battle_confirm_handled_at, 10.0)
+
+    def test_wait_checks_are_limited_to_twice_per_second(self) -> None:
+        task = self.make_task()
+        task._bottom_confirm_last_scan_at = float("-inf")
+        task.handle_bottom_confirm_popup = MagicMock(return_value=False)
+
+        with patch(
+            "src.tasks.BaseDNATask.time.monotonic",
+            side_effect=[10.0, 10.2, 10.5],
+        ):
+            task.check_bottom_confirm_during_wait()
+            task.check_bottom_confirm_during_wait()
+            task.check_bottom_confirm_during_wait()
+
+        self.assertEqual(task.handle_bottom_confirm_popup.call_count, 2)
+
+    def test_wait_resumes_original_condition_after_popup(self) -> None:
+        task = self.make_task()
+        task.check_bottom_confirm_during_wait = MagicMock(
+            side_effect=[True, False]
+        )
+        original_condition = MagicMock(return_value="ready")
+
+        def run_two_iterations(_task, wrapped_condition, **_kwargs):
+            return [wrapped_condition(), wrapped_condition()]
+
+        with patch.object(BaseTask, "wait_until", new=run_two_iterations):
+            result = BaseDNATask.wait_until(task, original_condition)
+
+        self.assertEqual(result, [None, "ready"])
+        original_condition.assert_called_once_with()
+
+    def test_popup_space_is_protected_by_reentrancy_guard(self) -> None:
+        task = self.make_task()
+        task.send_key = BaseDNATask.send_key.__get__(task, BaseDNATask)
+        task.check_bottom_confirm_before_action = MagicMock(
+            wraps=task.check_bottom_confirm_before_action
+        )
+
+        with (
+            patch.object(BaseTask, "send_key", return_value=None) as parent_send,
+            patch("src.tasks.BaseDNATask.time.monotonic", return_value=10.0),
+        ):
+            self.assertTrue(task.handle_bottom_confirm_popup())
+
+        task.check_bottom_confirm_before_action.assert_called_once_with()
+        task.find_one.assert_called_once_with(
+            "37_01",
+            horizontal_variance=0.03,
+            vertical_variance=0.03,
+            threshold=0.80,
+            canny_lower=50,
+            canny_higher=150,
+        )
+        parent_send.assert_called_once_with(
+            "space",
+            down_time=0.08,
+            interval=-1,
+            after_sleep=0,
+        )
+        self.assertFalse(task._bottom_confirm_action_guard)
 
     def test_boss_readiness_handles_popup_before_state_checks(self) -> None:
         task = AutoWildBossTask.__new__(AutoWildBossTask)

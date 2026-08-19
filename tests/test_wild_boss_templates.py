@@ -2,6 +2,9 @@ import json
 import unittest
 from pathlib import Path
 
+import cv2
+from ok.feature.FeatureSet import FeatureSet
+
 
 class WildBossTemplateTest(unittest.TestCase):
     def test_numbered_template_annotations_are_complete(self) -> None:
@@ -64,6 +67,83 @@ class WildBossTemplateTest(unittest.TestCase):
             }
         )
 
+    def test_room_ready_text_templates_clear_color_threshold(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        data = json.loads(
+            (project_root / "assets" / "coco_annotations.json").read_text(
+                encoding="utf-8-sig"
+            )
+        )
+        categories = {
+            category["id"]: category["name"]
+            for category in data["categories"]
+        }
+        images = {
+            image["id"]: image for image in data["images"]
+        }
+
+        scores = {}
+        for annotation in data["annotations"]:
+            name = categories[annotation["category_id"]]
+            if name not in {"20_01", "33_01", "34_01"}:
+                continue
+
+            image_info = images[annotation["image_id"]]
+            image = cv2.imread(
+                str(project_root / "assets" / image_info["file_name"])
+            )
+            self.assertIsNotNone(image, name)
+            x, y, width, height = annotation["bbox"]
+            template = image[y:y + height, x:x + width]
+            x_margin = round(image_info["width"] * 0.04)
+            y_margin = round(image_info["height"] * 0.04)
+            search_area = image[
+                max(0, y - y_margin):min(
+                    image_info["height"], y + height + y_margin
+                ),
+                max(0, x - x_margin):min(
+                    image_info["width"], x + width + x_margin
+                ),
+            ]
+            result = cv2.matchTemplate(
+                search_area,
+                template,
+                cv2.TM_CCOEFF_NORMED,
+            )
+            scores[name] = cv2.minMaxLoc(result)[1]
+
+        self.assertEqual(set(scores), {"20_01", "33_01", "34_01"})
+        for name, score in scores.items():
+            self.assertGreaterEqual(score, 0.82, (name, score))
+
+    def test_repeated_room_ready_matches_keep_three_channel_templates(
+        self,
+    ) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        coco_path = project_root / "assets" / "coco_annotations.json"
+        frame = cv2.imread(str(project_root / "assets" / "images" / "1.png"))
+        self.assertIsNotNone(frame)
+        feature_set = FeatureSet(
+            False,
+            str(coco_path),
+            0.02,
+            0.03,
+            0.8,
+        )
+
+        for _ in range(2):
+            matches = feature_set.find_one_feature(
+                frame,
+                "20_01",
+                horizontal_variance=0.04,
+                vertical_variance=0.04,
+                threshold=-1.0,
+                use_gray_scale=False,
+                limit=1,
+            )
+            self.assertTrue(matches)
+            self.assertEqual(feature_set.feature_dict["20_01"].mat.ndim, 3)
+
     @staticmethod
     def expected_bboxes() -> dict[str, list[int]]:
         return {
@@ -84,6 +164,8 @@ class WildBossTemplateTest(unittest.TestCase):
             "34_01": [1429, 288, 107, 19],
             "35_01": [1438, 35, 102, 25],
             "36_01": [761, 185, 78, 20],
+            "50_01": [1520, 329, 58, 20],
+            "50_02": [1537, 25, 34, 29],
         }
 
 

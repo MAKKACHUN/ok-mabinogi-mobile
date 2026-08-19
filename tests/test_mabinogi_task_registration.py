@@ -16,6 +16,10 @@ class MabinogiTaskRegistrationTest(unittest.TestCase):
                     "src.plugins.gather.tasks.AutoGatherTask",
                     "AutoGatherTask",
                 ],
+                [
+                    "src.plugins.map_events.tasks.AutoMapEventTask",
+                    "AutoMapEventTask",
+                ],
             ],
         )
         self.assertEqual(config["trigger_tasks"], [])
