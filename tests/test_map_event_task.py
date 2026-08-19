@@ -100,10 +100,8 @@ class MapEventTaskTest(unittest.TestCase):
                 self.assertTrue(matches)
 
     def test_local_region_template_distinguishes_frost_canyon(self) -> None:
-        frost_map = cv2.imread(str(self.project_root / "ok_templates" / "47.png"))
-        other_map = cv2.imread(str(self.project_root / "ok_templates" / "55.png"))
-        self.assertIsNotNone(frost_map)
-        self.assertIsNotNone(other_map)
+        frost_map = self.load_asset_frame("0")
+        other_map = self.load_asset_frame("1")
         self.assertTrue(
             self.feature_set.find_one_feature(
                 frost_map,
